@@ -27,7 +27,7 @@ from .errors import NotSupportedError
 from .link import uSwidLink, uSwidLinkRel
 from .entity import uSwidEntity, uSwidEntityRole
 from .enums import uSwidVersionScheme
-from .component import uSwidComponent
+from .component import uSwidComponent, uSwidComponentType
 from .hash import uSwidHash, uSwidHashAlg
 from .payload import uSwidPayload
 from .patch import uSwidPatch, uSwidPatchType
@@ -35,7 +35,7 @@ from .patch import uSwidPatch, uSwidPatchType
 from .format_ini import uSwidFormatIni
 from .format_coswid import uSwidFormatCoswid
 from .format_swid import uSwidFormatSwid
-from .format_cyclonedx import uSwidFormatCycloneDX
+from .format_cyclonedx import uSwidFormatCycloneDX, _convert_str_to_component_type
 from .format_spdx import uSwidFormatSpdx
 from .format_inf import uSwidFormatInf
 from .vcs import uSwidVcs
@@ -303,6 +303,53 @@ class TestSwidEntity(unittest.TestCase):
         self.assertEqual(
             uSwidVersionScheme.from_version("1.2.3-4~5"),
             uSwidVersionScheme.ALPHANUMERIC,
+        )
+
+    def test_component_type_from_str(self):
+        """SWID stringifier stays pure; CycloneDX type mapping lives in the loader"""
+
+        # uSwidComponentType.from_str: only the defined SWID types
+        self.assertEqual(
+            uSwidComponentType.from_str("firmware"), uSwidComponentType.FIRMWARE
+        )
+        self.assertEqual(
+            uSwidComponentType.from_str("application"), uSwidComponentType.APPLICATION
+        )
+        self.assertEqual(
+            uSwidComponentType.from_str("library"), uSwidComponentType.LIBRARY
+        )
+
+        # CycloneDX 1.4+ types are mapped to the nearest SWID type in the
+        # CycloneDX loader, and never crash the importer
+        self.assertEqual(
+            _convert_str_to_component_type("device-driver"), uSwidComponentType.FIRMWARE
+        )
+        self.assertEqual(
+            _convert_str_to_component_type("framework"), uSwidComponentType.LIBRARY
+        )
+        self.assertEqual(
+            _convert_str_to_component_type("operating-system"),
+            uSwidComponentType.APPLICATION,
+        )
+        self.assertEqual(
+            _convert_str_to_component_type("cryptographic-asset"),
+            uSwidComponentType.LIBRARY,
+        )
+        # native SWID types still resolve through the loader
+        self.assertEqual(
+            _convert_str_to_component_type("firmware"), uSwidComponentType.FIRMWARE
+        )
+        # matching is case-insensitive
+        self.assertEqual(
+            _convert_str_to_component_type("Device-Driver"), uSwidComponentType.FIRMWARE
+        )
+        # empty / unknown values fall back to FIRMWARE instead of raising
+        self.assertEqual(
+            _convert_str_to_component_type(""), uSwidComponentType.FIRMWARE
+        )
+        self.assertEqual(
+            _convert_str_to_component_type("totally-unknown"),
+            uSwidComponentType.FIRMWARE,
         )
 
     def test_container(self):

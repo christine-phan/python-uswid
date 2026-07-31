@@ -57,6 +57,36 @@ def _convert_str_to_version_scheme(version_scheme: str) -> uSwidVersionScheme:
     }.get(version_scheme, uSwidVersionScheme.UNKNOWN)
 
 
+def _convert_str_to_component_type(value: Optional[str]) -> uSwidComponentType:
+    """Map a CycloneDX component type to the nearest SWID component type.
+
+    CycloneDX 1.4+ defines component types (device-driver, framework,
+    operating-system, container, platform, file, cryptographic-asset, ...) that
+    have no native SWID/coSWID equivalent. Map each to the closest SWID type and
+    fall back to FIRMWARE for anything unknown, so a valid CycloneDX SBOM never
+    crashes the importer. (uSwidComponentType.from_str stays pure to the defined
+    SWID types.)
+    """
+    alias = {
+        "framework": "library",
+        "device-driver": "firmware",
+        "device": "firmware",
+        "platform": "firmware",
+        "operating-system": "application",
+        "container": "application",
+        "file": "library",
+        "cryptographic-asset": "library",
+        "machine-learning-model": "application",
+        "data": "library",
+    }
+    key = (value or "firmware").lower()
+    key = alias.get(key, key)
+    try:
+        return uSwidComponentType.from_str(key)
+    except KeyError:
+        return uSwidComponentType.FIRMWARE
+
+
 def _convert_entity_to_dict(entity: uSwidEntity) -> Dict[str, Any]:
     data: Dict[str, Any] = {}
     if entity.name:
@@ -113,7 +143,7 @@ class uSwidFormatCycloneDX(uSwidFormatBase):
         self, component: uSwidComponent, data: Dict[str, Any]
     ) -> None:
 
-        component.type = uSwidComponentType.from_str(data.get("type", "firmware"))
+        component.type = _convert_str_to_component_type(data.get("type"))
         component.persistent_id = data.get("group")
         component.cpe = data.get("cpe")
         component.software_name = data.get("name")
