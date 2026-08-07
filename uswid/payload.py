@@ -66,7 +66,7 @@ class uSwidPayload:
             problems += [
                 uSwidProblem("payload", f"No hashes in {self.name}", since="0.4.7")
             ]
-        if uSwidHashAlg.SHA256 not in self.hashes:
+        if uSwidHashAlg.SHA256 not in [ihash.alg_id for ihash in self.hashes]:
             problems += [
                 uSwidProblem("payload", f"No SHA256 hash in {self.name}", since="0.4.7")
             ]
