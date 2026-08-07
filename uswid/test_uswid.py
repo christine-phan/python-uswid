@@ -11,6 +11,7 @@
 import os
 import sys
 import unittest
+import datetime
 from typing import Optional, Any
 import shutil
 import subprocess
@@ -30,10 +31,11 @@ from .enums import uSwidVersionScheme
 from .component import uSwidComponent, uSwidComponentType
 from .hash import uSwidHash, uSwidHashAlg
 from .payload import uSwidPayload
+from .evidence import uSwidEvidence
 from .patch import uSwidPatch, uSwidPatchType
 
 from .format_ini import uSwidFormatIni
-from .format_coswid import uSwidFormatCoswid
+from .format_coswid import uSwidFormatCoswid, uSwidGlobalMap
 from .format_swid import uSwidFormatSwid
 from .format_cyclonedx import uSwidFormatCycloneDX, _convert_str_to_component_type
 from .format_spdx import uSwidFormatSpdx
@@ -653,6 +655,74 @@ class TestSwidEntity(unittest.TestCase):
         self.assertEqual(ini_load_patch.url, patch.url)
         self.assertEqual(ini_load_patch.description, patch.description)
         self.assertEqual(ini_load_patch.references, patch.references)
+
+    def test_evidence(self):
+        """Unit tests for uSwidEvidence, including the optional measured hash"""
+        self.maxDiff = None
+
+        # an evidence entry can now carry a measured hash (RFC 9393 records the
+        # measured hash on the evidence branch, inside a file-entry)
+        evidence = uSwidEvidence(
+            date=datetime.datetime.fromtimestamp(1600000000, tz=datetime.timezone.utc),
+            device_id="localhost",
+        )
+        evidence.add_hash(
+            uSwidHash(
+                alg_id=uSwidHashAlg.SHA256,
+                value="8cab6b2125c2b561351b4e02ee531f26dde05c3c6a2be8ff942975fbdef6823c",
+            )
+        )
+        self.assertIn("SHA256", str(evidence))
+        self.assertIn("8cab6b21", str(evidence))
+
+        # CoSWID export nests the measured hash under a FILE entry — RFC 9393 puts a
+        # hash-entry inside a file-entry, NOT at the evidence-map top level.
+        data = uSwidFormatCoswid()._save_evidence(evidence)  # type: ignore
+        self.assertNotIn(uSwidGlobalMap.HASH, data)  # not a bare hash at the map top
+        self.assertIn(uSwidGlobalMap.FILE, data)
+        self.assertIn(uSwidGlobalMap.HASH, data[uSwidGlobalMap.FILE])
+
+        # full CBOR save() -> load() round-trip on a real component, with TWO distinct
+        # algorithms, proves cross-tool interop (not just the in-memory helpers).
+        component = uSwidComponent(tag_id="test", software_version="1.2.3")
+        component.add_entity(
+            uSwidEntity(name="test", roles=[uSwidEntityRole.TAG_CREATOR])
+        )
+        ev = uSwidEvidence(
+            date=datetime.datetime.fromtimestamp(1600000000, tz=datetime.timezone.utc),
+            device_id="localhost",
+        )
+        ev.add_hash(
+            uSwidHash(
+                alg_id=uSwidHashAlg.SHA256,
+                value="8cab6b2125c2b561351b4e02ee531f26dde05c3c6a2be8ff942975fbdef6823c",
+            )
+        )
+        ev.add_hash(uSwidHash(alg_id=uSwidHashAlg.SHA384, value="a" * 96))
+        component.add_evidence(ev)
+        blob = uSwidFormatCoswid().save(uSwidContainer([component]))
+        component2 = uSwidFormatCoswid().load(blob)[0]
+        self.assertEqual(len(component2.evidences), 1)
+        got = {h.alg_id: h.value for h in component2.evidences[0].hashes}
+        self.assertEqual(
+            got[uSwidHashAlg.SHA256],
+            "8cab6b2125c2b561351b4e02ee531f26dde05c3c6a2be8ff942975fbdef6823c",
+        )
+        self.assertEqual(got[uSwidHashAlg.SHA384], "a" * 96)
+
+        # a second hash with the same algorithm is deduplicated by algorithm ID
+        ev.add_hash(
+            uSwidHash(
+                alg_id=uSwidHashAlg.SHA256,
+                value="067cb8292dc062eabbe05734ef7987eb1333b6b6067cb8292dc062eabbe05734",
+            )
+        )
+        self.assertEqual(len(ev.hashes), 2)  # SHA256 (replaced) + SHA384
+        replaced = {h.alg_id: h.value for h in ev.hashes}
+        self.assertEqual(
+            replaced[uSwidHashAlg.SHA256],
+            "067cb8292dc062eabbe05734ef7987eb1333b6b6067cb8292dc062eabbe05734",
+        )
 
     def test_component_purl(self):
         """Unit tests for uSwidComponent, PURL specific"""

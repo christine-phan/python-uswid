@@ -7,10 +7,11 @@
 #
 # pylint: disable=too-few-public-methods
 
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from datetime import datetime
 
+from .hash import uSwidHash, uSwidHashAlg
 from .problem import uSwidProblem, _is_redacted
 
 
@@ -27,6 +28,20 @@ class uSwidEvidence:
         """Date and time when this evidence was collected """
         self.device_id: Optional[str] = device_id
         """Device ID, typically a machine hostname"""
+        self._hashes: Dict[uSwidHashAlg, uSwidHash] = {}
+
+    def add_hash(self, ihash: uSwidHash) -> None:
+        """Adds a measured hash, deduplicating by algorithm ID"""
+        self._hashes[ihash.alg_id or uSwidHashAlg.UNKNOWN] = ihash
+
+    def remove_hash(self, alg_id: uSwidHashAlg) -> None:
+        """Removes a measured hash by algorithm ID"""
+        self._hashes.pop(alg_id)
+
+    @property
+    def hashes(self) -> List[uSwidHash]:
+        """Returns all the measured hashes"""
+        return list(self._hashes.values())
 
     def problems(self) -> List[uSwidProblem]:
         """Checks the payload for common problems"""
@@ -41,4 +56,7 @@ class uSwidEvidence:
         return problems
 
     def __repr__(self) -> str:
-        return f'uSwidEvidence(date="{self.date}",device_id={self.device_id})'
+        tmp = f'uSwidEvidence(date="{self.date}",device_id={self.device_id})'
+        for ihash in self.hashes:
+            tmp += f"\n - {ihash}"
+        return tmp

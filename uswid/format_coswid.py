@@ -232,6 +232,18 @@ class uSwidFormatCoswid(uSwidFormatBase):
             data[uSwidGlobalMap.DATE] = evidence.date.timestamp()
         if evidence.device_id:
             data[uSwidGlobalMap.DEVICE_ID] = evidence.device_id
+        if evidence.hashes:
+            # Per RFC 9393 a hash-entry is a member of a file-entry, not of the
+            # evidence-map itself; the evidence-map splices in the resource-collection
+            # group (which carries file-entry). Nest the measured hash under a FILE
+            # entry exactly as _save_payload does — do NOT emit a bare hash at the map
+            # top level.
+            file_data: Dict[uSwidGlobalMap, Any] = {}
+            evidence_hashes = []
+            for ihash in evidence.hashes:
+                evidence_hashes.append(self._save_hash(ihash))
+            _set_one_or_more(file_data, uSwidGlobalMap.HASH, evidence_hashes)
+            data[uSwidGlobalMap.FILE] = file_data
         return data
 
     def _save_entity(self, entity: uSwidEntity) -> Dict[uSwidGlobalMap, Any]:
@@ -393,6 +405,18 @@ class uSwidFormatCoswid(uSwidFormatBase):
                 evidence.date = datetime.utcfromtimestamp(value)
             if key == uSwidGlobalMap.DEVICE_ID:
                 evidence.device_id = value
+        # measured hashes live inside a FILE entry (RFC 9393: hash-entry is a member
+        # of file-entry), mirroring _load_payload — not at the evidence-map top level.
+        for file_data in _get_one_or_more(data, uSwidGlobalMap.FILE):
+            hash_value = file_data.get(uSwidGlobalMap.HASH)
+            if not hash_value:  # absent or an empty HASH list -> nothing to load
+                continue
+            if not isinstance(hash_value[0], list):
+                hash_value = [hash_value]
+            for hash_data in hash_value:
+                ihash = uSwidHash()
+                self._load_hash(ihash, hash_data)
+                evidence.add_hash(ihash)
 
     def _load_entity(
         self,
