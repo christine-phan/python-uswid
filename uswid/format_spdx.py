@@ -49,8 +49,212 @@ def _namespaced_tag_id(spdx_id: Optional[str], namespace: Optional[str]) -> Opti
     return spdx_id
 
 
+def _get_graph_nodes_by_class(data: Dict[str, Any], node_class: str) -> Optional[List[Dict[str, Any]]]:
+    """Get all nodes of a given class from an SPDX 3.0 JSON-LD document."""
+    if "@graph" not in data:
+        return None
+    graph = data["@graph"]
+    if not isinstance(graph, list):
+        return None
+    nodes: List[Dict[str, Any]] = []
+    for node in graph:
+        if not isinstance(node, dict):
+            continue
+        node_types = _spdx30_node_types(node)
+        if node_class in node_types:
+            nodes.append(node)
+    return nodes
+
+
+
+def _detect_spdx_json_version(data: Dict[str, Any]) -> str:
+    """Best-effort detection of SPDX JSON serialization version."""
+    # SPDX 3.0
+
+    # Check CreationInfo node for specVersion field 
+    creation_info_node = _get_graph_nodes_by_class(data, "CreationInfo")
+    if creation_info_node:
+        spec_version = creation_info_node[0].get("specVersion")
+        if isinstance(spec_version, str) and "3.0" in spec_version:
+            return "3.0"
+
+    # Fallback - assume that the presence of "@graph" indicates SPDX 3.0, even if specVersion is missing or malformed.
+    if "@graph" in data:
+        return "3.0"
+
+    # SPDX 2.3
+    spdx_version = data.get("spdxVersion")
+    if isinstance(spdx_version, str) and spdx_version.startswith("SPDX-2."):
+        return "2.3"
+
+    # Some SPDX 2.x JSON documents may omit spdxVersion in malformed cases.
+    if "packages" in data or "SPDXID" in data:
+        return "2.3"
+
+    raise NotSupportedError("unrecognized SPDX JSON format")
+
+
+def _spdx30_node_id(node: Dict[str, Any]) -> Optional[str]:
+    return node.get("spdxId") or node.get("@id")
+
+
+def _spdx30_node_types(node: Dict[str, Any]) -> List[str]:
+    node_type = node.get("type")
+    if isinstance(node_type, list):
+        return [value for value in node_type if isinstance(value, str)]
+    if isinstance(node_type, str):
+        return [node_type]
+    return []
+
+
+def _get_creator_name(creator: str) -> Optional[str]:
+    for prefix in ["Organization: ", "Person: ", "Tool: "]:
+        if creator.startswith(prefix):
+            return creator[len(prefix) :].strip()
+    return None
+
+
 class uSwidFormatSpdx(uSwidFormatBase):
     """SPDX file"""
+
+    def _add_spdx30_agent_entities(
+        self,
+        component: uSwidComponent,
+        entities: Any,
+        nodes_by_id: Dict[str, Dict[str, Any]],
+        role: uSwidEntityRole,
+    ) -> None:
+        if isinstance(entities, str):
+            entity_refs = [entities]
+        elif isinstance(entities, list):
+            entity_refs = entities
+        else:
+            return
+        for entity in entity_refs:
+            if not isinstance(entity, str):
+                continue
+            node = nodes_by_id.get(entity)
+            if node:
+                name = node.get("name")
+            else:
+                # Keep unresolved references as-is for visibility rather than
+                # silently dropping creators.
+                name = entity
+            if not name or not isinstance(name, str):
+                continue
+            component.add_entity(uSwidEntity(name=name, roles=[role]))
+
+    def _load_spdx30_creation_info(
+        self,
+        component: uSwidComponent,
+        node: Dict[str, Any],
+        nodes_by_id: Dict[str, Dict[str, Any]],
+    ) -> None:
+        creation_info_ref = node.get("creationInfo")
+        if not isinstance(creation_info_ref, str):
+            return
+        creation_info = nodes_by_id.get(creation_info_ref)
+        if not creation_info:
+            return
+        self._add_spdx30_agent_entities(
+            component,
+            creation_info.get("createdBy"),
+            nodes_by_id,
+            uSwidEntityRole.TAG_CREATOR,
+        )
+
+    def _load_single_node(
+        self,
+        node: Dict[str, Any],
+        nodes_by_id: Dict[str, Dict[str, Any]],
+    ) -> uSwidComponent:
+        component = uSwidComponent()
+        # tag_id
+        component.tag_id = _namespaced_tag_id(node.get("spdxId"), None)
+
+        # externalRefs (purl)
+
+        # basic fields
+        component.software_name = node.get("name")
+
+        # component.summary = pkg.get("summary")
+        component.software_version = node.get("software_packageVersion")
+
+        # licenseDeclared (best-effort extraction of SPDX IDs)
+
+        # originator / supplier
+        self._add_spdx30_agent_entities(
+            component,
+            node.get("suppliedBy"),
+            nodes_by_id,
+            uSwidEntityRole.LICENSOR,
+        )
+        self._add_spdx30_agent_entities(
+            component,
+            node.get("originatedBy"),
+            nodes_by_id,
+            uSwidEntityRole.SOFTWARE_CREATOR,
+        )
+        # creationInfo creators (tag creators)
+        self._load_spdx30_creation_info(component, node, nodes_by_id)
+        return component
+    
+
+    def _load_spdx30_relationship_depends_on(
+        self,
+        src: str,
+        targets: List[str],
+        components_by_spdxid: Dict[str, uSwidComponent],
+    ) -> None:
+        if src not in components_by_spdxid:
+            return
+
+        csrc = components_by_spdxid[src]
+        for tgt in targets:
+            if tgt not in components_by_spdxid:
+                continue
+            ctgt = components_by_spdxid[tgt]
+            if not ctgt.tag_id:
+                continue
+            csrc.add_link(uSwidLink(rel=uSwidLinkRel.COMPONENT, href=ctgt.tag_id))
+
+    def _load_spdx30_relationships(
+        self,
+        graph: List[Dict[str, Any]],
+        components_by_spdxid: Dict[str, uSwidComponent],
+    ) -> None:
+        # Search for "Relationship" nodes
+        for node in graph:
+            if not isinstance(node, dict):
+                continue
+            if "Relationship" not in _spdx30_node_types(node):
+                continue
+
+            relationship_type = node.get("relationshipType")
+            if not isinstance(relationship_type, str):
+                continue
+            relationship_type = relationship_type.upper()
+
+            # "from" field must have one element
+            src = node.get("from")
+            if not isinstance(src, str):
+                continue
+
+            # "to" field has one or more elements
+            to_values = node.get("to")
+            if isinstance(to_values, str):
+                targets: List[str] = [to_values]
+            elif isinstance(to_values, list):
+                targets = [value for value in to_values if isinstance(value, str)]
+            else:
+                continue
+
+            # Parse "dependsOn" relationship type
+            if relationship_type == "DEPENDS_ON":
+                self._load_spdx30_relationship_depends_on(
+                    src, targets, components_by_spdxid
+                )
+
 
     def _load_single_package(
         self,
@@ -110,20 +314,15 @@ class uSwidFormatSpdx(uSwidFormatBase):
         try:
             creators = data_root["creationInfo"]["creators"]
             for creator in creators:
-                if creator.startswith("Organization: "):
-                    component.add_entity(
-                        uSwidEntity(
-                            name=creator[14:], roles=[uSwidEntityRole.TAG_CREATOR]
-                        )
-                    )
-                    break
-                if creator.startswith("Person: "):
-                    component.add_entity(
-                        uSwidEntity(
-                            name=creator[8:], roles=[uSwidEntityRole.TAG_CREATOR]
-                        )
-                    )
-                    break
+                if not isinstance(creator, str):
+                    continue
+                creator_name = _get_creator_name(creator)
+                if not creator_name:
+                    continue
+                component.add_entity(
+                    uSwidEntity(name=creator_name, roles=[uSwidEntityRole.TAG_CREATOR])
+                )
+
         except KeyError:
             pass
 
@@ -133,12 +332,7 @@ class uSwidFormatSpdx(uSwidFormatBase):
         """Initializes uSwidFormatSpdx"""
         uSwidFormatBase.__init__(self, "SPDX")
 
-    def load(self, blob: bytes, path: Optional[str] = None) -> uSwidContainer:
-        try:
-            data = json.loads(blob)
-        except json.JSONDecodeError as e:
-            raise NotSupportedError(f"invalid JSON file: {e}") from e
-
+    def _load_spdx23(self, data: Dict[str, Any]) -> uSwidContainer:
         packages = data.get("packages")
         if not packages:
             # return empty container vs raising, depending on policy
@@ -174,7 +368,53 @@ class uSwidFormatSpdx(uSwidFormatBase):
 
         return container
 
-    def save(self, container: uSwidContainer) -> bytes:
+    def _load_spdx30(self, data: Dict[str, Any]) -> uSwidContainer:
+        graph = data.get("@graph")
+        if not isinstance(graph, list):
+            raise NotSupportedError("SPDX 3.0 JSON-LD document missing @graph list")
+
+        # build nodes
+        nodes_by_id: Dict[str, Dict[str, Any]] = {}
+        for node in graph:
+            if not isinstance(node, dict):
+                continue
+            node_id = _spdx30_node_id(node)
+            if node_id:
+                nodes_by_id[node_id] = node
+        
+        # handle software_Package class type
+        container = uSwidContainer()
+        components_by_spdxid: Dict[str, uSwidComponent] = {}
+        for node in graph:
+            if not isinstance(node, dict):
+                continue
+            node_types = _spdx30_node_types(node)
+            if any("software_Package" in t for t in node_types):
+                component = self._load_single_node(node, nodes_by_id)
+                container.append(component)
+                if component.tag_id:
+                    components_by_spdxid[component.tag_id] = component
+
+        # relationships (dependencies)
+        self._load_spdx30_relationships(graph, components_by_spdxid)
+
+        return container
+
+    def load(self, blob: bytes, path: Optional[str] = None) -> uSwidContainer:
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError as e:
+            raise NotSupportedError(f"invalid JSON file: {e}") from e
+
+        version = _detect_spdx_json_version(data)
+        if version == "2.3":
+            return self._load_spdx23(data)
+        if version == "3.0":
+            return self._load_spdx30(data)
+
+        raise NotSupportedError(f"unsupported SPDX JSON version {version}")
+
+    def _save_spdx23(self, container: uSwidContainer) -> bytes:
         # header
         root: Dict[str, Any] = {}
         root["SPDXID"] = "SPDXRef-DOCUMENT"
@@ -218,6 +458,16 @@ class uSwidFormatSpdx(uSwidFormatBase):
             root["packages"] = packages
 
         return json.dumps(root, indent=2, ensure_ascii=False).encode()
+
+    def _save_spdx30(self, container: uSwidContainer) -> bytes:
+        raise NotSupportedError(
+            "SPDX 3.0 saving is not implemented yet; this method is the refactor seam"
+        )
+
+    def save(self, container: uSwidContainer) -> bytes:
+        # Keep SPDX 2.3 output as the default until caller-level version
+        # selection is wired in a later refactor step.
+        return self._save_spdx23(container)
 
     def _save_component(self, component: uSwidComponent) -> Dict[str, Any]:
         root: Dict[str, Any] = {}
