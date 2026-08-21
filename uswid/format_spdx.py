@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2023 Richard Hughes <richard@hughsie.com>
-# (c) Copyright 2025 HP Development Company, L.P.
+# (c) Copyright 2025 - 2026 HP Development Company, L.P.
 #
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 
