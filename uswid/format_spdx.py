@@ -49,6 +49,50 @@ def _namespaced_tag_id(spdx_id: Optional[str], namespace: Optional[str]) -> Opti
     return spdx_id
 
 
+def _get_graph_nodes_by_type(data: Dict[str, Any], node_type: str) -> Optional[List[Dict[str, Any]]]:
+    """Get all nodes of a given type from an SPDX 3.0 JSON-LD document."""
+    if "@graph" not in data:
+        return None
+    graph = data["@graph"]
+    if not isinstance(graph, list):
+        return None
+    nodes: List[Dict[str, Any]] = []
+    for node in graph:
+        if not isinstance(node, dict):
+            continue
+        curr_node_type = node.get("type")
+        if curr_node_type:
+            if isinstance(curr_node_type, str) and curr_node_type == node_type:
+                nodes.append(node)
+    return nodes
+
+
+def _detect_spdx_json_version(data: Dict[str, Any]) -> str:
+    """Best-effort detection of SPDX JSON serialization version."""
+    # SPDX 3.0
+    # Check CreationInfo node for specVersion field 
+    creation_info_node = _get_graph_nodes_by_type(data, "CreationInfo")
+    if creation_info_node:
+        spec_version = creation_info_node[0].get("specVersion")
+        if isinstance(spec_version, str) and "3.0" in spec_version:
+            return "3.0"
+
+    # Fallback - assume that the presence of "@graph" indicates SPDX 3.0, even if specVersion is missing or malformed.
+    if "@graph" in data:
+        return "3.0"
+
+    # SPDX 2.3
+    spdx_version = data.get("spdxVersion")
+    if isinstance(spdx_version, str) and spdx_version.startswith("SPDX-2."):
+        return "2.3"
+
+    # Some SPDX 2.x JSON documents may omit spdxVersion in malformed cases.
+    if "packages" in data or "SPDXID" in data:
+        return "2.3"
+
+    raise NotSupportedError("unrecognized SPDX JSON format")
+
+
 class uSwidFormatSpdx(uSwidFormatBase):
     """SPDX file"""
 
@@ -132,6 +176,7 @@ class uSwidFormatSpdx(uSwidFormatBase):
     def __init__(self) -> None:
         """Initializes uSwidFormatSpdx"""
         uSwidFormatBase.__init__(self, "SPDX")
+        self.version = None
 
     def load(self, blob: bytes, path: Optional[str] = None) -> uSwidContainer:
         try:
@@ -139,6 +184,15 @@ class uSwidFormatSpdx(uSwidFormatBase):
         except json.JSONDecodeError as e:
             raise NotSupportedError(f"invalid JSON file: {e}") from e
 
+        self.version = _detect_spdx_json_version(data)
+        if self.version == "2.3":
+            return self._load_spdx23(data)
+        if self.version == "3.0":
+            return self._load_spdx30(data)
+
+        raise NotSupportedError(f"unsupported SPDX JSON version {self.version}")
+
+    def _load_spdx23(self, data: Dict[str, Any]) -> uSwidContainer:
         packages = data.get("packages")
         if not packages:
             # return empty container vs raising, depending on policy
@@ -173,6 +227,12 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 continue  # skip malformed relationship objects
 
         return container
+
+    def _load_spdx30(self, data: Dict[str, Any]) -> uSwidContainer:
+        graph = data.get("@graph")
+        if not isinstance(graph, list):
+            raise NotSupportedError("SPDX 3.0 JSON-LD document missing @graph list")
+        print("Not implemented yet")
 
     def save(self, container: uSwidContainer) -> bytes:
         # header
