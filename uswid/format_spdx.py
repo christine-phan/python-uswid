@@ -83,7 +83,7 @@ def _detect_spdx_json_version(data: Dict[str, Any]) -> str:
 
     # SPDX 2.3
     spdx_version = data.get("spdxVersion")
-    if isinstance(spdx_version, str) and spdx_version == "SPDX-2.3":
+    if isinstance(spdx_version, str) and spdx_version.startswith("SPDX-2."):
         return "2.3"
 
     # Some SPDX 2.x JSON documents may omit spdxVersion in malformed cases.
@@ -91,10 +91,6 @@ def _detect_spdx_json_version(data: Dict[str, Any]) -> str:
         return "2.3"
 
     raise NotSupportedError("unrecognized SPDX JSON format")
-
-
-def _spdx30_node_id(node: Dict[str, Any]) -> Optional[str]:
-    return node.get("spdxId") or node.get("@id")
 
 
 class uSwidFormatSpdx(uSwidFormatBase):
@@ -323,30 +319,8 @@ class uSwidFormatSpdx(uSwidFormatBase):
         graph = data.get("@graph")
         if not isinstance(graph, list):
             raise NotSupportedError("SPDX 3.0 JSON-LD document missing @graph list")
+        print("Not implemented yet")
 
-        # build nodes
-        nodes_by_id: Dict[str, Dict[str, Any]] = {}
-        for node in graph:
-            if not isinstance(node, dict):
-                continue
-            node_id = _spdx30_node_id(node)
-            if node_id:
-                nodes_by_id[node_id] = node
-        
-        # handle software_Package class type
-        container = uSwidContainer()
-        components_by_spdxid: Dict[str, uSwidComponent] = {}
-        for node in graph:
-            if not isinstance(node, dict):
-                continue
-            node_type = node.get("type")
-            if node_type == "software_Package":
-                component = self._load_single_node(node, nodes_by_id)
-                container.append(component)
-                if component.tag_id:
-                    components_by_spdxid[component.tag_id] = component
-        return container
-    
     def save(self, container: uSwidContainer) -> bytes:
         # header
         root: Dict[str, Any] = {}
