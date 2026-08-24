@@ -232,8 +232,7 @@ class uSwidFormatSpdx(uSwidFormatBase):
         graph = data.get("@graph")
         if not isinstance(graph, list):
             raise NotSupportedError("SPDX 3.0 JSON-LD document missing @graph list")
-        print("Not implemented yet")
-
+        raise NotSupportedError("SPDX 3.0 JSON-LD loading is not implemented")
     def save(self, container: uSwidContainer) -> bytes:
         # header
         root: Dict[str, Any] = {}
