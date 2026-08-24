@@ -83,7 +83,7 @@ def _detect_spdx_json_version(data: Dict[str, Any]) -> str:
 
     # SPDX 2.3
     spdx_version = data.get("spdxVersion")
-    if isinstance(spdx_version, str) and spdx_version.startswith("SPDX-2."):
+    if isinstance(spdx_version, str) and spdx_version == "SPDX-2.3":
         return "2.3"
 
     # Some SPDX 2.x JSON documents may omit spdxVersion in malformed cases.
