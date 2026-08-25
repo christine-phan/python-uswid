@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2021 Richard Hughes <richard@hughsie.com>
+# (c) Copyright 2026 HP Development Company, L.P.
 #
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 #
@@ -18,6 +19,8 @@ import sys
 
 from importlib import metadata as importlib_metadata
 from importlib.metadata import PackageNotFoundError
+
+from uswid.enums import SpdxVersion
 
 sys.path.append(os.path.realpath("."))
 
@@ -233,6 +236,14 @@ def main():
         default=None,
         action="append",
         help="file to export, .efi,.ini,.uswid,.xml,.json",
+    )
+    parser.add_argument(
+        "--spdx-version",
+        default=None,
+        type=SpdxVersion.argparse,
+        choices=list(SpdxVersion),
+        dest="spdx_version",
+        help="Version of SPDX file to export, 2.3 or 3.0",
     )
     parser.add_argument(
         "--compress",
@@ -546,6 +557,15 @@ def main():
                 base.objcopy = args.objcopy
                 base.cc = args.cc
                 base.cflags = args.cflags
+            if isinstance(base, uSwidFormatSpdx):
+                if args.spdx_version is None:
+                    parser.error("SPDX version must be specified for spdx.json files")
+                elif args.spdx_version == SpdxVersion.SPDX_2_3:
+                    base.version = "2.3"
+                elif args.spdx_version == SpdxVersion.SPDX_3_0:
+                    base.version = "3.0"
+                else:
+                    parser.error("Unsupported SPDX version for spdx.json files")
             blob = base.save(container)
             if blob:
                 with open(filepath, "wb") as f:

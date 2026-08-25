@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2021 Richard Hughes <richard@hughsie.com>
+# (c) Copyright 2026 HP Development Company, L.P.
 #
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 
@@ -93,5 +94,26 @@ class uSwidPayloadFormat(IntEnum):
         """Used only for argparse"""
         try:
             return uSwidPayloadFormat[s.upper()]
+        except KeyError:
+            return s
+
+
+class SpdxVersion(IntEnum):
+    """The SPDX version"""
+
+    SPDX_2_3 = 0
+    SPDX_3_0 = 1
+
+    def __str__(self):
+        return self.name.lower()
+
+    def __repr__(self):
+        return str(self)
+
+    @staticmethod
+    def argparse(s):
+        """Used only for argparse"""
+        try:
+            return SpdxVersion[s.upper()]
         except KeyError:
             return s
