@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, List
 
 import json
 import uuid
+from urllib.parse import quote
 from datetime import datetime
 
 from .container import uSwidContainer
@@ -20,6 +21,7 @@ from .errors import NotSupportedError
 from .hash import uSwidHashAlg
 from .link import uSwidLink, uSwidLinkRel
 from .purl import uSwidPurl
+from uswid import container
 
 
 def _convert_hash_alg_id(alg_id: uSwidHashAlg) -> str:
@@ -95,6 +97,24 @@ def _detect_spdx_json_version(data: Dict[str, Any]) -> str:
 
 def _spdx30_node_id(node: Dict[str, Any]) -> Optional[str]:
     return node.get("spdxId") or node.get("@id")
+
+
+def _entity_to_spdx_anyuri(entity: uSwidEntity) -> Optional[str]:
+    """Convert an entity identity into a stable xsd:anyURI string."""
+    if not entity.name:
+        return None
+    stripped_name = entity.name.replace(" ", "_")
+    encoded_name = quote(stripped_name, safe="")
+    if not encoded_name:
+        return None
+
+    if entity.regid:
+        # Use regid as the authority when available.
+        return f"https://{entity.regid}/spdx/agent/{encoded_name}"
+
+    # Fallback to a deterministic URN when no regid is available.
+    stable_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"agent:{stripped_name}")
+    return f"urn:uuid:{stable_uuid}:{stripped_name}"
 
 
 class uSwidFormatSpdx(uSwidFormatBase):
@@ -402,6 +422,13 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 )
     
     def save(self, container: uSwidContainer) -> bytes:
+        if self.version == "2.3":
+            return self._save_2_3(container)
+        elif self.version == "3.0":
+            return self._save_3_0(container)
+        raise NotSupportedError(f"Unsupported SPDX version: {self.version}")
+
+    def _save_2_3(self, container: uSwidContainer) -> bytes:
         # header
         root: Dict[str, Any] = {}
         root["SPDXID"] = "SPDXRef-DOCUMENT"
@@ -445,6 +472,57 @@ class uSwidFormatSpdx(uSwidFormatBase):
             root["packages"] = packages
 
         return json.dumps(root, indent=2, ensure_ascii=False).encode()
+
+    def _save_3_0(self, container: uSwidContainer) -> bytes:
+        root: Dict[str, Any] = {}
+        root["@context"] = "https://spdx.org/rdf/3.0.1/spdx-context.jsonld"
+
+        # @graph nodes
+        nodes: List[Dict[str, Any]] = []
+
+        # creation info
+        creation_info: Dict[str, Any] = {
+            "type": "CreationInfo",
+            "@id": "_:creationinfo",
+            "createdBy": ["Tool: uSWID"],
+            "created": datetime.now().strftime("%FT%TZ"),
+        }
+        creator_names_by_uri: Dict[str, str] = {}
+        agent_nodes: List[Dict[str, Any]] = []
+        for component in container:
+            for entity in component.entities:
+                if uSwidEntityRole.TAG_CREATOR in entity.roles:
+                    anyuri = _entity_to_spdx_anyuri(entity)
+                    if anyuri and anyuri not in creation_info["createdBy"]:
+                        creation_info["createdBy"].append(anyuri)
+                        # simultaneously create agent nodes
+                        # at minimum, the type, spdxId, and creationInfo properties are required
+                        # there are "Person", "Organization", etc types, but we cannot determine programmatically
+                        agent: Dict[str, Any] = {
+                            "type": "Agent",
+                            "spdxId": anyuri,
+                            "name": entity.name,
+                            "creationInfo": "_:creationinfo"
+                        }
+                        agent_nodes.append(agent)
+                    if anyuri and entity.name:
+                        creator_names_by_uri[entity.name] = anyuri
+
+        creation_info["specVersion"] = "3.0.1"
+        nodes.append(creation_info)
+
+        # Agent type
+        for agent in agent_nodes:
+            nodes.append(agent)
+
+        # Package type
+        for component in container:
+
+        # Relationship type
+
+
+        root["@graph"] = nodes
+        return json.dumps(root, indent=4, ensure_ascii=False).encode()
 
     def _save_component(self, component: uSwidComponent) -> Dict[str, Any]:
         root: Dict[str, Any] = {}
