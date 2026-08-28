@@ -212,10 +212,9 @@ class uSwidFormatSpdx(uSwidFormatBase):
         # basic fields
         component.software_name = node.get("name")
 
-        # component.summary = pkg.get("summary")
-        component.software_version = node.get("software_packageVersion")
+        component.summary = node.get("summary")
 
-        # licenseDeclared (best-effort extraction of SPDX IDs) - not implemented yet
+        component.software_version = node.get("software_packageVersion")
 
         # originator / supplier
         self._add_spdx30_agent_entities(
@@ -360,7 +359,6 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 container.append(component)
                 if component.tag_id:
                     components_by_spdxid[component.tag_id] = component
-
         # relationships (dependencies)
         self._load_spdx30_relationships(graph, components_by_spdxid)
 
@@ -467,7 +465,7 @@ class uSwidFormatSpdx(uSwidFormatBase):
         # optional
         packages: List[Dict[str, Any]] = []
         for component in container:
-            packages.append(self._save_component(component))
+            packages.append(self._save_2_3_component(component))
         if packages:
             root["packages"] = packages
 
@@ -485,6 +483,7 @@ class uSwidFormatSpdx(uSwidFormatBase):
             "type": "CreationInfo",
             "@id": "_:creationinfo",
             "createdBy": ["Tool: uSWID"],
+            "specVersion": "3.0.1",
             "created": datetime.now().strftime("%FT%TZ"),
         }
         creator_names_by_uri: Dict[str, str] = {}
@@ -508,7 +507,6 @@ class uSwidFormatSpdx(uSwidFormatBase):
                     if anyuri and entity.name:
                         creator_names_by_uri[entity.name] = anyuri
 
-        creation_info["specVersion"] = "3.0.1"
         nodes.append(creation_info)
 
         # Agent type
@@ -517,14 +515,27 @@ class uSwidFormatSpdx(uSwidFormatBase):
 
         # Package type
         for component in container:
+            nodes.append(self._save_3_0_component(component, creator_names_by_uri))
 
         # Relationship type
-
+        for component in container:
+            for link in component.links:
+                if link.rel in [uSwidLinkRel.COMPONENT]:
+                    depends_on_relationship: Dict[str, Any] = {
+                        "type": "Relationship",
+                        "spdxId": str(uuid.uuid4()),
+                        "creationInfo": "_:creationinfo",
+                        "from": component.tag_id,
+                        "relationshipType": "depends_on",
+                        "to": [link.href],
+                        "completeness": "complete"
+                    }
+                    nodes.append(depends_on_relationship)
 
         root["@graph"] = nodes
         return json.dumps(root, indent=4, ensure_ascii=False).encode()
 
-    def _save_component(self, component: uSwidComponent) -> Dict[str, Any]:
+    def _save_2_3_component(self, component: uSwidComponent) -> Dict[str, Any]:
         root: Dict[str, Any] = {}
 
         # attrs
@@ -589,5 +600,50 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 license_spdx_ids.append(link.spdx_id)
         if license_spdx_ids:
             root["licenseDeclared"] = " AND ".join(license_spdx_ids)
+
+        return root
+
+    def _save_3_0_component(self, component: uSwidComponent, creator_names_by_uri: Dict[str, str]) -> Dict[str, Any]:
+        package_spdx_id = component.tag_id
+        if not package_spdx_id:
+            if component.software_name:
+                package_spdx_id = str(
+                    uuid.uuid5(uuid.NAMESPACE_URL, f"package:{component.software_name}")
+                )
+            else:
+                package_spdx_id = str(uuid.uuid4())
+
+        # required fields
+        root: Dict[str, Any] = {
+            "type": "software_Package",
+            "spdxId": package_spdx_id,
+            "creationInfo": "_:creationinfo",
+            "name":component.software_name,
+        }
+
+        # software version
+        if component.software_version:
+            root["software_packageVersion"] = component.software_version
+
+        # download location
+        root["software_downloadLocation"] = "NOASSERTION"
+
+        # originator / supplier
+        originator: Optional[str] = None
+        supplier: Optional[str] = None
+        for entity in component.entities:
+            if uSwidEntityRole.LICENSOR in entity.roles:
+                if entity.name:
+                    supplier = creator_names_by_uri.get(entity.name, entity.name)
+            if uSwidEntityRole.SOFTWARE_CREATOR in entity.roles:
+                if entity.name:
+                    originator = creator_names_by_uri.get(entity.name, entity.name)
+        if originator:
+            root["originatedBy"] = [originator]
+        if supplier:
+            root["suppliedBy"] = supplier
+
+        if component.summary:
+            root["summary"] = component.summary
 
         return root
