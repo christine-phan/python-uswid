@@ -626,7 +626,7 @@ class uSwidFormatSpdx(uSwidFormatBase):
             root["software_packageVersion"] = component.software_version
 
         # download location
-        root["software_downloadLocation"] = "NOASSERTION"
+        root["software_downloadLocation"] = "NoneElement"
 
         # originator / supplier
         originator: Optional[str] = None
