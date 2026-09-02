@@ -38,7 +38,11 @@ from .format_ini import uSwidFormatIni
 from .format_coswid import uSwidFormatCoswid, uSwidGlobalMap
 from .format_swid import uSwidFormatSwid
 from .format_cyclonedx import uSwidFormatCycloneDX, _convert_str_to_component_type
-from .format_spdx import uSwidFormatSpdx
+from .format_spdx import (
+    uSwidFormatSpdx,
+    _get_graph_nodes_by_type,
+    _detect_spdx_json_version,
+)
 from .format_inf import uSwidFormatInf
 from .vcs import uSwidVcs
 
@@ -1059,6 +1063,137 @@ rel = see-also
         self.assertEqual(licensor_names, ["SupplyCorp"])
         self.assertEqual(creator_names, ["OriginCorp"])
         self.assertEqual(tag_creator_names, ["TagCo"])
+
+    def test_spdx_get_graph_nodes_by_type_graph_not_present(self):
+        """SPDX 3.0 graph helper should handle missing graph"""
+        self.assertIsNone(_get_graph_nodes_by_type({}, "CreationInfo"))
+
+
+    def test_spdx_get_graph_nodes_by_type_graph_is_empty(self):
+        """SPDX 3.0 graph helper should handle empty graph"""
+        data = {"@graph": []}
+        nodes = _get_graph_nodes_by_type(data, "CreationInfo")
+        self.assertEqual(nodes, [])
+
+    def test_spdx_get_graph_nodes_by_type(self):
+        """SPDX 3.0 graph helper should filter nodes by type"""
+
+        jsonstr = {
+            "@graph": [
+                {"type": "CreationInfo", "specVersion": "SPDX-3.0.1"},
+                {"type": "software_Package", "spdxId": "http://spdx.example.com/Package1"},
+                {"type": "software_Package", "spdxId": "http://spdx.example.com/Package2"},
+                {"type": ["CreationInfo"]}, # ignore non-string type fields
+                "not-a-dict",   # ignore non-dict entries
+                {"name": "no-type"},    # ignore dicts without a type field
+            ]
+        }
+        nodes = _get_graph_nodes_by_type(jsonstr, "software_Package")
+        self.assertEqual(len(nodes), 2)
+        self.assertEqual(_get_graph_nodes_by_type(jsonstr, "nonexistent_Node"), [])
+
+    def test_spdx_detect_json_version_invalid_version(self):
+        """SPDX JSON version detection should raise for invalid version"""
+        with self.assertRaises(NotSupportedError):
+            _detect_spdx_json_version({"invalid": "version"})
+
+    def test_spdx_detect_json_version_2_3(self):
+        """SPDX JSON version detection supports 2.3 format"""
+        jsonstr = {
+            "spdxVersion": "SPDX-2.3",
+            "creationInfo": {"creators": ["Organization: TagCo"]},
+            "packages": [
+                {
+                    "SPDXID": "SPDXRef-pkgA",
+                    "name": "pkgA",
+                    "versionInfo": "1.2.3",
+                    "summary": "Test package A",
+                    "licenseDeclared": "BSD-2-Clause",
+                    "originator": "Organization: OriginCorp",
+                    "supplier": "Organization: SupplyCorp",
+                }
+            ],
+        }
+        self.assertEqual(_detect_spdx_json_version(jsonstr), "2.3")
+
+    def test_spdx_detect_json_version_3_0_specVersion(self):
+        """SPDX JSON version detection supports 3.0 format"""
+        # explicit SPDX 3.0 through CreationInfo node
+        jsonstr = {
+            "@graph": [
+                {"type": "CreationInfo", "specVersion": "SPDX-3.0.1"},
+                {"type": "software_Package", "spdxId": "http://spdx.example.com/Package1"},
+                {"type": "software_Package", "spdxId": "http://spdx.example.com/Package2"},
+            ]
+        }
+        self.assertEqual(_detect_spdx_json_version(jsonstr), "3.0")
+
+    def test_spdx_detect_json_version_3_0_fallback(self):
+        """SPDX JSON version detection supports 3.0 format fallback"""
+        # fallback SPDX 3.0 if @graph exists but specVersion is absent/malformed
+        self.assertEqual(_detect_spdx_json_version({"@graph": []}), "3.0")
+
+    def test_spdx_load_2_3(self):
+        """load() should route data to the right SPDX loader by detected version"""
+
+        class _TestFormatSpdx(uSwidFormatSpdx):
+            def _load_spdx23(self, data: dict[str, Any]) -> uSwidContainer:
+                self._called = "2.3"  # type: ignore[attr-defined]
+                return uSwidContainer([uSwidComponent(tag_id="from23")])
+
+            def _load_spdx30(self, data: dict[str, Any]) -> uSwidContainer:
+                self._called = "3.0"  # type: ignore[attr-defined]
+                return uSwidContainer([uSwidComponent(tag_id="from30")])
+
+        jsonstr = {
+            "spdxVersion": "SPDX-2.3",
+            "creationInfo": {"creators": ["Organization: TagCo"]},
+            "packages": [
+                {
+                    "SPDXID": "SPDXRef-pkgA",
+                    "name": "pkgA",
+                    "versionInfo": "1.2.3",
+                    "summary": "Test package A",
+                    "licenseDeclared": "BSD-2-Clause",
+                    "originator": "Organization: OriginCorp",
+                    "supplier": "Organization: SupplyCorp",
+                }
+            ],
+        }
+
+        # SPDX 2.3 document uses _load_spdx23
+        fmt_23 = _TestFormatSpdx()
+        container_23 = fmt_23.load(json.dumps(jsonstr).encode())
+        self.assertEqual(fmt_23.version, "2.3")
+        self.assertEqual(fmt_23._called, "2.3")  # type: ignore[attr-defined]
+        self.assertEqual(container_23[0].tag_id, "from23")
+
+    def test_spdx_load_3_0(self):
+        """load() should route data to the right SPDX loader by detected version"""
+
+        class _TestFormatSpdx(uSwidFormatSpdx):
+            def _load_spdx23(self, data: dict[str, Any]) -> uSwidContainer:
+                self._called = "2.3"  # type: ignore[attr-defined]
+                return uSwidContainer([uSwidComponent(tag_id="from23")])
+
+            def _load_spdx30(self, data: dict[str, Any]) -> uSwidContainer:
+                self._called = "3.0"  # type: ignore[attr-defined]
+                return uSwidContainer([uSwidComponent(tag_id="from30")])
+
+        jsonstr = {
+            "@graph": [
+                {"type": "CreationInfo", "specVersion": "SPDX-3.0.1"},
+                {"type": "software_Package", "spdxId": "http://spdx.example.com/Package1"},
+                {"type": "software_Package", "spdxId": "http://spdx.example.com/Package2"},
+            ]
+        }
+
+        # SPDX 3.0 document uses _load_spdx30
+        fmt_30 = _TestFormatSpdx()
+        container_30 = fmt_30.load(json.dumps(jsonstr).encode())
+        self.assertEqual(fmt_30.version, "3.0")
+        self.assertEqual(fmt_30._called, "3.0")  # type: ignore[attr-defined]
+        self.assertEqual(container_30[0].tag_id, "from30")
 
     def test_spdx_multiple_packages_with_dep(self):
         """Unit tests for SPDX multiple packages with dependencies"""
