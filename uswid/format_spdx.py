@@ -343,7 +343,6 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 container.append(component)
                 if component.tag_id:
                     components_by_spdxid[component.tag_id] = component
-<<<<<<< HEAD
 
         # relationships (dependencies)
         self._load_spdx30_relationships(graph, components_by_spdxid)
@@ -404,9 +403,6 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 self._load_spdx30_relationship_depends_on(
                     src, targets, components_by_spdxid
                 )
-=======
-        return container
->>>>>>> users/christine/spdx30-support-load-node
     
     def save(self, container: uSwidContainer) -> bytes:
         # header
