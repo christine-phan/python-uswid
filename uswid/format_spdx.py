@@ -185,9 +185,12 @@ class uSwidFormatSpdx(uSwidFormatBase):
         """Load a single SPDX 3.0 node from JSON data."""
         component = uSwidComponent()
         # tag_id
-        component.tag_id = _namespaced_tag_id(node.get("spdxId"), None)
+        component.tag_id = _namespaced_tag_id(_spdx30_node_id(node), None)
 
-        # externalRefs (purl) - not implemented yet
+        # externalRefs (purl)
+        package_url = node.get("packageURL")
+        if isinstance(package_url, str):
+            component.purl = uSwidPurl(package_url)
 
         # basic fields
         component.software_name = node.get("name")
@@ -340,6 +343,7 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 container.append(component)
                 if component.tag_id:
                     components_by_spdxid[component.tag_id] = component
+<<<<<<< HEAD
 
         # relationships (dependencies)
         self._load_spdx30_relationships(graph, components_by_spdxid)
@@ -400,6 +404,9 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 self._load_spdx30_relationship_depends_on(
                     src, targets, components_by_spdxid
                 )
+=======
+        return container
+>>>>>>> users/christine/spdx30-support-load-node
     
     def save(self, container: uSwidContainer) -> bytes:
         # header
