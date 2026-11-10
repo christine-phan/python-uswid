@@ -419,12 +419,18 @@ class uSwidFormatSpdx(uSwidFormatBase):
                     src, targets, components_by_spdxid
                 )
     
-    def save(self, container: uSwidContainer) -> bytes:
+    def save(self, container: uSwidContainer, version: str = "2.3") -> bytes:
+        # If the CLI specified the version, use it; otherwise, fall back to the provided version argument
         if self.version == "2.3":
             return self._save_2_3(container)
         elif self.version == "3.0":
             return self._save_3_0(container)
-        raise NotSupportedError(f"Unsupported SPDX version: {self.version}")
+        elif version == "2.3":
+            return self._save_2_3(container)
+        elif version == "3.0":
+            return self._save_3_0(container)
+        else:
+            raise NotSupportedError(f"Unsupported SPDX version: {self.version}")
 
     def _save_2_3(self, container: uSwidContainer) -> bytes:
         # header

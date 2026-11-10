@@ -558,12 +558,12 @@ def main():
                 base.cc = args.cc
                 base.cflags = args.cflags
             if isinstance(base, uSwidFormatSpdx):
-                if args.spdx_version is None:
-                    parser.error("SPDX version must be specified for spdx.json files")
-                elif args.spdx_version == SpdxVersion.SPDX_2_3:
+                if args.spdx_version == SpdxVersion.SPDX_2_3:
                     base.version = "2.3"
                 elif args.spdx_version == SpdxVersion.SPDX_3_0:
                     base.version = "3.0"
+                elif args.spdx_version is None:
+                    base.version = "2.3"    # default to SPDX 2.3 if no version is specified
                 else:
                     parser.error("Unsupported SPDX version for spdx.json files")
             blob = base.save(container)
