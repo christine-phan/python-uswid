@@ -343,8 +343,9 @@ class uSwidFormatSpdx(uSwidFormatBase):
             if node_type == "software_Package":
                 component = self._load_single_node(node, nodes_by_id)
                 container.append(component)
-                if component.tag_id:
-                    components_by_spdxid[component.tag_id] = component
+                node_id = _spdx30_node_id(node)
+                if node_id:
+                    components_by_spdxid[node_id] = component
 
         # relationships (dependencies)
         self._load_spdx30_relationships(graph, components_by_spdxid)
