@@ -558,9 +558,9 @@ def main():
                 base.cc = args.cc
                 base.cflags = args.cflags
             if isinstance(base, uSwidFormatSpdx):
-                if args.spdx_version == SpdxVersion.SPDX_2_3:
+                if args.spdx_version == SpdxVersion.SPDX_23:
                     base.version = "2.3"
-                elif args.spdx_version == SpdxVersion.SPDX_3_0:
+                elif args.spdx_version == SpdxVersion.SPDX_30:
                     base.version = "3.0"
                 elif args.spdx_version is None:
                     base.version = "2.3"    # default to SPDX 2.3 if no version is specified
