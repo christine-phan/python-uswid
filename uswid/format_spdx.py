@@ -385,7 +385,6 @@ class uSwidFormatSpdx(uSwidFormatBase):
             relationship_type = node.get("relationshipType")
             if not isinstance(relationship_type, str):
                 continue
-            relationship_type = relationship_type.upper()
 
             # "from" field must have one element
             src = node.get("from")
@@ -402,7 +401,8 @@ class uSwidFormatSpdx(uSwidFormatBase):
                 continue
 
             # Parse "dependsOn" relationship type
-            if relationship_type == "DEPENDS_ON":
+            relationship_type = relationship_type.upper()
+            if relationship_type == "DEPENDS_ON" or relationship_type == "DEPENDSON":
                 self._load_spdx30_relationship_depends_on(
                     src, targets, components_by_spdxid
                 )
