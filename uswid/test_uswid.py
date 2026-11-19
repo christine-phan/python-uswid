@@ -1458,6 +1458,37 @@ rel = see-also
             )
         )
 
+    def test_spdx30_camel_case_depends_on_adds_component_link(self):
+        """A dependsOn relationship should be a valid relationship type."""
+        fmt = uSwidFormatSpdx()
+        src_id = "http://spdx.example.com/pkg/A"
+        tgt_id = "http://spdx.example.com/pkg/B"
+        src = uSwidComponent(tag_id=src_id)
+        tgt = uSwidComponent(tag_id=tgt_id)
+
+        components_by_spdxid = {
+            "http://spdx.example.com/pkg/A": src,
+            "http://spdx.example.com/pkg/B": tgt,
+        }
+
+        fmt._load_spdx30_relationships(
+            [
+                {
+                    "type": "Relationship",
+                    "relationshipType": "dependsOn",
+                    "from": src_id,
+                    "to": tgt_id,
+                }
+            ],
+            components_by_spdxid,
+        )
+
+        # Check that the source component has a link to the target component
+        self.assertEqual(
+            [(link.rel, link.href) for link in src.links],
+            [(uSwidLinkRel.COMPONENT, tgt_id)],
+        )
+
     def test_spdx_multiple_packages_with_dep(self):
         """Unit tests for SPDX multiple packages with dependencies"""
         jsonstr: dict[str, Any] = {
